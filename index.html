@@ -567,6 +567,95 @@
 
   .stars { font-size: 2.5rem; margin-bottom: 10px; }
 
+  /* ========== STATS PANEL ========== */
+  .stats-bar {
+    max-width: 600px;
+    margin: 0 auto 18px;
+    background: #fff;
+    border-radius: 14px;
+    padding: 14px 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .stats-bar:hover { box-shadow: 0 3px 14px rgba(0,0,0,0.12); }
+  .stats-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #555;
+  }
+  .stats-summary .sessions { color: #1976d2; }
+  .stats-summary .best { color: #43a047; }
+  .stats-summary .weak-count { color: #e53935; }
+  .stats-toggle { font-size: 0.8rem; color: #999; }
+  .stats-detail {
+    display: none;
+    margin-top: 14px;
+    border-top: 1px solid #eee;
+    padding-top: 14px;
+  }
+  .stats-detail.open { display: block; }
+  .stats-detail h4 {
+    font-size: 0.9rem;
+    color: #e53935;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .weak-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 0.9rem;
+  }
+  .weak-item:last-child { border-bottom: none; }
+  .weak-item .pair { font-weight: 600; }
+  .weak-item .miss-count {
+    background: #ffebee;
+    color: #e53935;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .weak-item .mastered {
+    background: #e8f5e9;
+    color: #43a047;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .stats-reset {
+    margin-top: 12px;
+    padding: 6px 16px;
+    background: none;
+    border: 1px solid #ccc;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    color: #999;
+    cursor: pointer;
+  }
+  .stats-reset:hover { border-color: #e53935; color: #e53935; }
+  .stats-session-log {
+    margin-top: 10px;
+  }
+  .stats-session-log h4 {
+    color: #1976d2;
+  }
+  .session-entry {
+    font-size: 0.85rem;
+    color: #666;
+    padding: 4px 0;
+    border-bottom: 1px solid #f5f5f5;
+  }
+  .session-entry:last-child { border-bottom: none; }
+
   /* ========== TABLET (600px+) ========== */
   @media (min-width: 600px) {
     body { padding: 28px 32px; }
@@ -624,6 +713,25 @@
   <button class="mode-btn" onclick="switchMode('match')">Match</button>
   <button class="mode-btn" onclick="switchMode('type')">Type It</button>
   <button class="mode-btn" onclick="switchMode('map')">Map</button>
+</div>
+
+<!-- ========== STATS PANEL ========== -->
+<div class="stats-bar" id="stats-bar" onclick="toggleStats()">
+  <div class="stats-summary">
+    <span class="sessions" id="stats-sessions">0 sessions</span>
+    <span class="best" id="stats-best">-</span>
+    <span class="weak-count" id="stats-weak-count">0 weak spots</span>
+    <span class="stats-toggle" id="stats-toggle-icon">&#9660;</span>
+  </div>
+  <div class="stats-detail" id="stats-detail">
+    <h4>Weak Spots (most missed)</h4>
+    <div id="stats-weak-list"><em>No data yet - start practicing!</em></div>
+    <div class="stats-session-log">
+      <h4>Recent Sessions</h4>
+      <div id="stats-session-list"><em>No sessions yet</em></div>
+    </div>
+    <button class="stats-reset" onclick="event.stopPropagation(); resetStats();">Reset All Stats</button>
+  </div>
 </div>
 
 <!-- ========== FLASHCARD ========== -->
@@ -861,6 +969,9 @@ function switchMode(mode) {
 }
 
 function showResults(correct, total, missed) {
+  // Save to localStorage
+  recordSession(currentMode, correct, total, missed);
+
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById('results-section').classList.add('active');
 
@@ -1025,7 +1136,11 @@ fcSection.addEventListener('touchend', e => {
 // ===== QUIZ =====
 let quizOrder, quizIndex, quizCorrect, quizWrong, quizStreak, quizMissed, quizLocked;
 function initQuiz() {
-  quizOrder = shuffle([...Array(DATA.length).keys()]);
+  // Front-load weak provinces
+  const weak = new Set(getWeakProvinces());
+  const weakIdx = DATA.map((d, i) => i).filter(i => weak.has(DATA[i].province));
+  const restIdx = DATA.map((d, i) => i).filter(i => !weak.has(DATA[i].province));
+  quizOrder = [...shuffle(weakIdx), ...shuffle(restIdx)];
   quizIndex = 0;
   quizCorrect = 0;
   quizWrong = 0;
@@ -1445,7 +1560,124 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ===== STATS / LOCALSTORAGE =====
+const STORAGE_KEY = 'canada-flashcards-stats';
+
+function loadStats() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { mistakes: {}, sessions: [] };
+  } catch { return { mistakes: {}, sessions: [] }; }
+}
+
+function saveStats(stats) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(stats)); } catch {}
+}
+
+function recordMistake(province) {
+  const stats = loadStats();
+  stats.mistakes[province] = (stats.mistakes[province] || 0) + 1;
+  saveStats(stats);
+}
+
+function recordSession(mode, correct, total, missed) {
+  const stats = loadStats();
+  const now = new Date();
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const date = now.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  stats.sessions.push({
+    mode, correct, total, time: date + ' ' + time,
+    missed: missed.map(m => m.province)
+  });
+  // Keep last 20 sessions
+  if (stats.sessions.length > 20) stats.sessions = stats.sessions.slice(-20);
+  // Record each miss
+  missed.forEach(m => {
+    stats.mistakes[m.province] = (stats.mistakes[m.province] || 0) + 1;
+  });
+  saveStats(stats);
+  renderStatsPanel();
+}
+
+function renderStatsPanel() {
+  const stats = loadStats();
+  const sessions = stats.sessions;
+  const mistakes = stats.mistakes;
+
+  // Sessions count
+  document.getElementById('stats-sessions').textContent = sessions.length + ' session' + (sessions.length !== 1 ? 's' : '');
+
+  // Best score
+  if (sessions.length > 0) {
+    const best = Math.max(...sessions.map(s => Math.round(s.correct / s.total * 100)));
+    document.getElementById('stats-best').textContent = 'Best: ' + best + '%';
+  } else {
+    document.getElementById('stats-best').textContent = '-';
+  }
+
+  // Weak spots count
+  const weakEntries = Object.entries(mistakes).sort((a, b) => b[1] - a[1]);
+  const weakCount = weakEntries.filter(e => e[1] >= 2).length;
+  document.getElementById('stats-weak-count').textContent =
+    weakCount > 0 ? weakCount + ' weak spot' + (weakCount !== 1 ? 's' : '') : 'No weak spots';
+
+  // Weak spots detail list
+  const weakEl = document.getElementById('stats-weak-list');
+  if (weakEntries.length === 0) {
+    weakEl.innerHTML = '<em>No data yet - start practicing!</em>';
+  } else {
+    weakEl.innerHTML = weakEntries.map(([prov, count]) => {
+      const d = DATA.find(x => x.province === prov);
+      const capital = d ? d.capital : '?';
+      const badge = count >= 3
+        ? '<span class="miss-count">' + count + ' misses</span>'
+        : count >= 1
+        ? '<span class="miss-count">' + count + ' miss' + (count > 1 ? 'es' : '') + '</span>'
+        : '<span class="mastered">OK</span>';
+      return '<div class="weak-item"><span class="pair">' + prov + ' \u2192 ' + capital + '</span>' + badge + '</div>';
+    }).join('');
+  }
+
+  // Session log
+  const sessEl = document.getElementById('stats-session-list');
+  if (sessions.length === 0) {
+    sessEl.innerHTML = '<em>No sessions yet</em>';
+  } else {
+    sessEl.innerHTML = sessions.slice().reverse().slice(0, 10).map(s => {
+      const pct = Math.round(s.correct / s.total * 100);
+      const modeLabel = s.mode.charAt(0).toUpperCase() + s.mode.slice(1);
+      return '<div class="session-entry">' + s.time + ' \u2014 ' + modeLabel +
+        ': <strong>' + s.correct + '/' + s.total + '</strong> (' + pct + '%)' +
+        (s.missed.length > 0 ? ' <span style="color:#e53935;font-size:0.8rem">missed: ' + s.missed.join(', ') + '</span>' : '') +
+        '</div>';
+    }).join('');
+  }
+}
+
+function toggleStats() {
+  const detail = document.getElementById('stats-detail');
+  const icon = document.getElementById('stats-toggle-icon');
+  detail.classList.toggle('open');
+  icon.innerHTML = detail.classList.contains('open') ? '&#9650;' : '&#9660;';
+}
+
+function resetStats() {
+  if (confirm('Reset all stats? This clears your mistake history and session log.')) {
+    localStorage.removeItem(STORAGE_KEY);
+    renderStatsPanel();
+  }
+}
+
+// Get weak provinces for prioritizing in quiz/flashcard ordering
+function getWeakProvinces() {
+  const stats = loadStats();
+  return Object.entries(stats.mistakes)
+    .sort((a, b) => b[1] - a[1])
+    .filter(e => e[1] >= 2)
+    .map(e => e[0]);
+}
+
 // ===== INIT =====
+renderStatsPanel();
 initFlashcards();
 </script>
 </body>
