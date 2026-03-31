@@ -460,10 +460,13 @@
     max-width: 600px;
     margin: 0 auto 16px;
     position: relative;
+    /* Prevent browser handling touch as scroll/zoom on the map */
+    touch-action: manipulation;
   }
   .map-svg-container svg {
     width: 100%;
     height: auto;
+    overflow: visible;
   }
   .map-svg-container path {
     fill: #dce8f0;
@@ -471,9 +474,18 @@
     stroke-width: 1.5;
     cursor: pointer;
     transition: fill 0.2s;
+    /* Ensure tappable on touch screens */
+    pointer-events: all;
   }
-  .map-svg-container path:hover {
-    fill: #b3d4fc;
+  /* Hover only for non-touch devices */
+  @media (hover: hover) {
+    .map-svg-container path:hover {
+      fill: #b3d4fc;
+    }
+  }
+  /* Active state for touch feedback */
+  .map-svg-container path:active {
+    fill: #90caf9;
   }
   .map-svg-container path.map-correct {
     fill: #81c784;
@@ -489,6 +501,24 @@
   .map-svg-container path.map-done {
     fill: #c8e6c9;
     cursor: default;
+    pointer-events: none;
+  }
+
+  /* Province name label tooltip for touch */
+  .map-province-label {
+    position: absolute;
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    pointer-events: none;
+    transform: translate(-50%, -100%);
+    margin-top: -8px;
+    white-space: nowrap;
+    z-index: 10;
+    animation: fadeIn 0.2s ease;
   }
   .map-feedback {
     font-size: 1.2rem;
@@ -684,7 +714,10 @@
     .type-input { padding: 16px; font-size: 1.15rem; }
 
     .map-container { max-width: 90vw; }
+    .map-svg-container { max-width: 80vw; }
     .map-question { font-size: 1.5rem; }
+    .map-feedback { font-size: 1.3rem; }
+    .map-mode-toggle label { padding: 10px 18px; font-size: 1rem; }
 
     .progress-container { height: 22px; }
     .progress-text { font-size: 0.85rem; }
@@ -699,6 +732,7 @@
     .quiz-option { padding: 22px; font-size: 1.15rem; }
     .match-container { max-width: 750px; }
     .match-item { padding: 18px 20px; font-size: 1.1rem; }
+    .map-svg-container { max-width: 700px; }
   }
 </style>
 </head>
@@ -1417,6 +1451,9 @@ function getMapMode() {
 
 document.querySelectorAll('input[name="mapmode"]').forEach(r => r.addEventListener('change', () => initMap()));
 
+// Small provinces that are hard to tap — increase their stroke-width for bigger hit area
+const SMALL_PROVINCES = ['CA-PE', 'CA-NS', 'CA-NB'];
+
 function initMap() {
   mapMode = getMapMode();
   mapOrder = shuffle([...Array(DATA.length).keys()]);
@@ -1426,18 +1463,51 @@ function initMap() {
   mapMissed = [];
   mapLocked = false;
 
-  // Reset all province colors
+  // Reset all province colors and enlarge small province hit areas
   DATA.forEach(d => {
     const el = document.getElementById(d.svgId);
     if (el) {
       el.className.baseVal = '';
       el.removeEventListener('click', mapClickHandler);
       el.addEventListener('click', mapClickHandler);
+      // Make small provinces easier to tap
+      if (SMALL_PROVINCES.includes(d.svgId)) {
+        el.style.strokeWidth = '4';
+        el.style.paintOrder = 'stroke';
+        el.style.stroke = '#fff';
+      } else {
+        el.style.strokeWidth = '';
+        el.style.paintOrder = '';
+      }
     }
   });
 
+  // Remove any lingering label
+  clearMapLabel();
+
   updateMapScore();
   showMapQuestion();
+}
+
+// Show province name on touch for "capital" mode (so she knows what she tapped)
+function showMapLabel(svgEl, name) {
+  clearMapLabel();
+  const container = document.getElementById('map-svg-container');
+  const rect = svgEl.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  const label = document.createElement('div');
+  label.className = 'map-province-label';
+  label.id = 'map-label';
+  label.textContent = name;
+  label.style.left = (rect.left + rect.width / 2 - containerRect.left) + 'px';
+  label.style.top = (rect.top - containerRect.top) + 'px';
+  container.appendChild(label);
+  setTimeout(clearMapLabel, 2000);
+}
+
+function clearMapLabel() {
+  const old = document.getElementById('map-label');
+  if (old) old.remove();
 }
 
 function updateMapScore() {
@@ -1514,43 +1584,62 @@ function mapCapitalAnswer(btn, chosen, correct) {
 }
 
 function mapClickHandler(e) {
-  if (mapMode !== 'find' || mapLocked) return;
-  const clickedId = e.target.id || e.target.closest('path')?.id;
+  if (mapLocked) return;
+  const target = e.target.closest ? e.target.closest('path') : e.target;
+  const clickedId = target?.id;
   if (!clickedId) return;
 
+  // In capital mode, clicking shows the province name — the answer is via buttons
+  if (mapMode === 'capital') {
+    const clickedData = DATA.find(x => x.svgId === clickedId);
+    if (clickedData) showMapLabel(target, clickedData.province);
+    return;
+  }
+
+  // Find mode
   mapLocked = true;
   const d = DATA[mapOrder[mapIndex]];
   const fb = document.getElementById('map-feedback');
 
+  // Show what they tapped
+  const clickedData = DATA.find(x => x.svgId === clickedId);
+  if (clickedData) showMapLabel(target, clickedData.province);
+
   if (clickedId === d.svgId) {
     mapCorrect++;
-    e.target.classList.add('map-correct');
+    target.classList.add('map-correct');
     fb.innerHTML = '<span style="color:#43a047">Correct! Capital: <strong>' + d.capital + '</strong></span>';
     setTimeout(() => {
-      e.target.className.baseVal = 'map-done';
+      target.className.baseVal = 'map-done';
+      if (SMALL_PROVINCES.includes(d.svgId)) {
+        target.style.strokeWidth = '4';
+        target.style.paintOrder = 'stroke';
+      }
     }, 800);
   } else {
     mapWrong++;
     mapMissed.push(d);
-    e.target.classList.add('map-wrong');
+    target.classList.add('map-wrong');
     // Briefly highlight the correct one
     const correctEl = document.getElementById(d.svgId);
     if (correctEl) correctEl.classList.add('map-highlight');
-    const clickedName = DATA.find(x => x.svgId === clickedId);
     fb.innerHTML = '<span style="color:#e53935">That\'s ' +
-      (clickedName ? clickedName.province : 'wrong') +
-      '!</span> <strong>' + d.province + '</strong> is highlighted now. Capital: <strong>' + d.capital + '</strong>';
+      (clickedData ? clickedData.province : 'wrong') +
+      '!</span> <strong>' + d.province + '</strong> is highlighted. Capital: <strong>' + d.capital + '</strong>';
     setTimeout(() => {
-      e.target.classList.remove('map-wrong');
+      target.classList.remove('map-wrong');
       if (correctEl) correctEl.classList.remove('map-highlight');
-    }, 1800);
+      clearMapLabel();
+    }, 2200);
   }
 
   mapIndex++;
   updateMapScore();
+  const wasCorrect = clickedId === d.svgId;
   setTimeout(() => {
+    clearMapLabel();
     showMapQuestion();
-  }, mapCorrect === mapIndex ? 1000 : 2000);
+  }, wasCorrect ? 1000 : 2500);
 }
 
 // ===== KEYBOARD =====
