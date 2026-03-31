@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Canada Provinces & Capitals - Study Time!</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -742,15 +742,15 @@
 <p class="subtitle">10 provinces + 3 territories to learn - you've got this!</p>
 
 <div class="mode-bar">
-  <button class="mode-btn active" onclick="switchMode('flashcard')">Flashcards</button>
-  <button class="mode-btn" onclick="switchMode('quiz')">Quiz</button>
-  <button class="mode-btn" onclick="switchMode('match')">Match</button>
-  <button class="mode-btn" onclick="switchMode('type')">Type It</button>
-  <button class="mode-btn" onclick="switchMode('map')">Map</button>
+  <button class="mode-btn active" data-mode="flashcard" onclick="switchMode('flashcard')">Flashcards</button>
+  <button class="mode-btn" data-mode="quiz" onclick="switchMode('quiz')">Quiz</button>
+  <button class="mode-btn" data-mode="match" onclick="switchMode('match')">Match</button>
+  <button class="mode-btn" data-mode="type" onclick="switchMode('type')">Type It</button>
+  <button class="mode-btn" data-mode="map" onclick="switchMode('map')">Map</button>
 </div>
 
 <!-- ========== STATS PANEL ========== -->
-<div class="stats-bar" id="stats-bar" onclick="toggleStats()">
+<div class="stats-bar" id="stats-bar" role="button" tabindex="0" onclick="toggleStats()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleStats();}">
   <div class="stats-summary">
     <span class="sessions" id="stats-sessions">0 sessions</span>
     <span class="best" id="stats-best">-</span>
@@ -791,7 +791,6 @@
       <button class="reveal-btn" id="fc-reveal-btn" onclick="fcReveal()">Show Answer</button>
     </div>
     <div class="fc-counter" id="fc-counter"></div>
-    <div class="swipe-hint">Swipe left/right to navigate</div>
   </div>
 </div>
 
@@ -984,13 +983,7 @@ function shuffle(arr) {
 function switchMode(mode) {
   currentMode = mode;
   document.querySelectorAll('.mode-btn').forEach(b => {
-    const btnMode = b.textContent.toLowerCase().replace(/ /g,'').replace('it','');
-    b.classList.toggle('active', btnMode === mode || b.textContent.toLowerCase() === mode);
-  });
-  // Fix mode button matching
-  const modeNames = { 'flashcards': 'flashcard', 'quiz': 'quiz', 'match': 'match', 'type it': 'type', 'map': 'map' };
-  document.querySelectorAll('.mode-btn').forEach(b => {
-    b.classList.toggle('active', modeNames[b.textContent.toLowerCase()] === mode);
+    b.classList.toggle('active', b.dataset.mode === mode);
   });
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById(mode + '-section').classList.add('active');
@@ -1058,6 +1051,7 @@ function initFlashcards() {
   fcDone = 0;
   fcLearning = 0;
   fcRevealed = false;
+  fcMissed = [];
   renderRegionChips();
   showFlashcard();
 }
@@ -1083,7 +1077,8 @@ document.querySelectorAll('input[name="dir"]').forEach(r => r.addEventListener('
 
 function showFlashcard() {
   if (fcQueue.length === 0) {
-    showResults(fcDone, DATA.length, []);
+    const correctCount = DATA.length - fcMissed.length;
+    showResults(correctCount, DATA.length, fcMissed);
     return;
   }
   fcRevealed = false;
@@ -1128,13 +1123,20 @@ function fcReveal() {
     '</div>';
 }
 
+let fcMissed; // track cards marked "Still Learning" for stats
+
 function fcRate(knew) {
   const card = fcQueue.shift();
   if (knew) {
     fcDone++;
-    // Remove from learning count if it was re-queued
     if (card._requeued) fcLearning--;
   } else {
+    // Record as a mistake for stats
+    recordMistake(card.province);
+    if (!card._countedAsMissed) {
+      fcMissed.push(card);
+      card._countedAsMissed = true;
+    }
     // Put it back near the end (but not last — interleave it)
     card._requeued = true;
     const insertAt = Math.min(fcQueue.length, Math.max(3, Math.floor(fcQueue.length * 0.6)));
@@ -1254,7 +1256,7 @@ function quizAnswer(btn, chosen, correct, d) {
 }
 
 // ===== MATCH =====
-let matchPairs, matchCorrect, matchWrong, matchSelected, matchRound;
+let matchPairs, matchCorrect, matchWrong, matchSelected, matchRound, matchMissedSet;
 const MATCH_BATCH = 5;
 
 function initMatch() {
@@ -1267,6 +1269,7 @@ function initMatch() {
   matchWrong = 0;
   matchRound = 0;
   matchSelected = null;
+  matchMissedSet = new Set(); // track indices of pairs that had at least one wrong attempt
   updateMatchScore();
   showMatchRound();
 }
@@ -1281,7 +1284,9 @@ function updateMatchScore() {
 function showMatchRound() {
   const start = matchRound * MATCH_BATCH;
   if (start >= DATA.length) {
-    showResults(DATA.length, DATA.length, []);
+    const missed = [...matchMissedSet].map(i => DATA[i]);
+    const correctCount = DATA.length - missed.length;
+    showResults(correctCount, DATA.length, missed);
     return;
   }
   const batch = matchPairs.slice(start, start + MATCH_BATCH);
@@ -1355,6 +1360,9 @@ function matchClick(el) {
     }
   } else {
     matchWrong++;
+    // Track both sides as missed
+    matchMissedSet.add(idx1);
+    matchMissedSet.add(idx2);
     el.classList.add('wrong-match');
     matchSelected.classList.add('wrong-match');
     const prev = matchSelected;
@@ -1418,10 +1426,16 @@ function typeCheck() {
   typeLocked = true;
   const correct = d.capital;
 
-  const normalize = s => s.toLowerCase().replace(/[^a-z ]/g, '').trim();
-  const isCorrect = normalize(answer) === normalize(correct) ||
-    normalize(answer) === normalize(correct).replace('city', '').trim() ||
-    (normalize(correct).includes(normalize(answer)) && normalize(answer).length >= 4);
+  // Strict matching: exact match or known acceptable aliases only
+  const normalize = s => s.toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+  const ALIASES = {
+    'quebec city': ['quebec'],
+    'st johns': ['saint johns', 'st johns'],
+  };
+  const normAnswer = normalize(answer);
+  const normCorrect = normalize(correct);
+  const acceptedForms = [normCorrect, ...(ALIASES[normCorrect] || [])];
+  const isCorrect = acceptedForms.includes(normAnswer);
 
   if (isCorrect) {
     typeCorrectCount++;
@@ -1679,10 +1693,12 @@ function recordSession(mode, correct, total, missed) {
   });
   // Keep last 20 sessions
   if (stats.sessions.length > 20) stats.sessions = stats.sessions.slice(-20);
-  // Record each miss
-  missed.forEach(m => {
-    stats.mistakes[m.province] = (stats.mistakes[m.province] || 0) + 1;
-  });
+  // Record each miss (flashcard mode records mistakes live via recordMistake, so skip here)
+  if (mode !== 'flashcard') {
+    missed.forEach(m => {
+      stats.mistakes[m.province] = (stats.mistakes[m.province] || 0) + 1;
+    });
+  }
   saveStats(stats);
   renderStatsPanel();
 }
