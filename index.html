@@ -112,23 +112,24 @@
     justify-content: center;
     margin-bottom: 14px;
   }
+  /* Status readout, not a control: no border or raised background, so these
+     don't read as tappable filter buttons. */
   .region-chip {
-    padding: 6px 14px;
-    border-radius: 16px;
-    font-size: 0.85rem;
+    padding: 3px 9px;
+    border-radius: 4px;
+    font-size: 0.8rem;
     font-weight: 600;
-    border: 2px solid #ccc;
-    background: #fff;
-    color: #555;
+    border: none;
+    background: transparent;
+    color: #8a8a8a;
+    cursor: default;
   }
   .region-chip.active-region {
-    border-color: #1976d2;
-    background: #e3f2fd;
+    background: #e8f2fb;
     color: #1976d2;
   }
   .region-chip.done-region {
-    border-color: #43a047;
-    background: #e8f5e9;
+    background: transparent;
     color: #43a047;
   }
 
