@@ -1137,7 +1137,7 @@ function fcRate(knew) {
       fcMissed.push(card);
       card._countedAsMissed = true;
     }
-    // Put it back near the end (but not last — interleave it)
+    // Put it back near the end (but not last, interleave it)
     card._requeued = true;
     const insertAt = Math.min(fcQueue.length, Math.max(3, Math.floor(fcQueue.length * 0.6)));
     fcQueue.splice(insertAt, 0, card);
@@ -1465,7 +1465,7 @@ function getMapMode() {
 
 document.querySelectorAll('input[name="mapmode"]').forEach(r => r.addEventListener('change', () => initMap()));
 
-// Small provinces that are hard to tap — increase their stroke-width for bigger hit area
+// Small provinces that are hard to tap, so increase their stroke-width for a bigger hit area
 const SMALL_PROVINCES = ['CA-PE', 'CA-NS', 'CA-NB'];
 
 function initMap() {
@@ -1603,7 +1603,7 @@ function mapClickHandler(e) {
   const clickedId = target?.id;
   if (!clickedId) return;
 
-  // In capital mode, clicking shows the province name — the answer is via buttons
+  // In capital mode, clicking shows the province name; the answer is via buttons
   if (mapMode === 'capital') {
     const clickedData = DATA.find(x => x.svgId === clickedId);
     if (clickedData) showMapLabel(target, clickedData.province);
